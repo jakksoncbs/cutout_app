@@ -1,0 +1,10 @@
+# Core engine (CLI needs only these)
+rembg>=2.0
+onnxruntime>=1.17
+pillow>=10.2
+numpy>=1.26
+
+# Web UI only (not needed for the CLI)
+fastapi>=0.111
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
