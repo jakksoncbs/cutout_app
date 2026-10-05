@@ -1,0 +1,49 @@
+name: Build desktop launchers
+
+# Builds the macOS .app bundle and the Windows launcher folder on real
+# runners and uploads them as downloadable artifacts. Run it manually from
+# the Actions tab, or push a version tag like v1.0.0.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build Cutout.app
+        run: |
+          chmod +x scripts/make_macos_app.sh
+          scripts/make_macos_app.sh dist
+      - name: Zip the app bundle
+        run: |
+          cd dist
+          zip -r -y Cutout-macos.zip Cutout.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cutout-macos
+          path: dist/Cutout-macos.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build Windows launcher
+        shell: pwsh
+        run: scripts/make_windows_launcher.ps1 dist
+      - name: Zip the launcher folder
+        shell: pwsh
+        run: Compress-Archive -Path dist/Cutout -DestinationPath dist/Cutout-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cutout-windows
+          path: dist/Cutout-windows.zip

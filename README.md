@@ -40,6 +40,69 @@ Drag-drop (or click / paste) an image. You get a before/after preview on a
 checkerboard so the transparency is visible, and a Download button. Switch
 between PNG and WebP with the dropdown.
 
+## Desktop app (drop window on the taskbar / Dock)
+
+You don't have to touch the command line to use the GUI. The same drag-drop
+window can run as a one-click desktop app.
+
+**Prerequisite:** Python 3.11+ installed on the machine. The launcher does the
+rest — on first run it creates its own virtual environment under `~/.cutout/`,
+installs dependencies, starts the server, and opens the drop window in your
+browser. (First launch takes a minute; later launches are instant.)
+
+### Run it now (from the cloned folder)
+
+- **macOS:** double-click **`Cutout.command`** in Finder. It opens in Terminal;
+  leave that window open while you work, close it to quit.
+- **Windows:** double-click **`Cutout.bat`**. Leave the console window open; close
+  it to quit.
+
+Behind the scenes this runs `python launch.py`, which you can also call directly:
+
+```bash
+python launch.py            # start (or focus an already-running instance)
+python launch.py --stop     # stop a running instance
+python launch.py --no-browser
+```
+
+### Make it pinnable (taskbar / Dock)
+
+Build a packaged launcher with an app icon that you can pin.
+
+- **macOS** → a `Cutout.app` bundle:
+  ```bash
+  scripts/make_macos_app.sh        # writes dist/Cutout.app
+  ```
+  Drag `dist/Cutout.app` to `/Applications`, open it once, then right-click its
+  Dock icon → **Options → Keep in Dock**.
+
+- **Windows** → a launcher folder with a pinnable shortcut:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts\make_windows_launcher.ps1
+  ```
+  In `dist\Cutout\`, right-click **`Cutout.lnk`** → **Pin to taskbar** (or Pin to
+  Start). `Cutout.vbs` starts it with no console window once you're past first
+  run.
+
+These packaged apps still use the system Python (they're launchers, not
+self-contained binaries), so Python 3.11+ must be installed.
+
+### Build both automatically (CI)
+
+The [`Build desktop launchers`](.github/workflows/build.yml) GitHub Actions
+workflow builds the macOS `.app` and the Windows launcher on real runners and
+uploads them as downloadable artifacts — no local dev setup needed. Run it from
+the **Actions** tab (**Run workflow**), or push a tag like `v1.0.0`. Download the
+`Cutout-macos` / `Cutout-windows` artifacts from the run.
+
+> Want a truly self-contained binary (no Python needed on the target machine)?
+> That's a PyInstaller build — ask and it can be added as a second packaging path.
+
+### Optional: app icon
+
+Drop `assets/Cutout.icns` (macOS) and/or `assets/Cutout.ico` (Windows) into the
+repo and the build scripts will use them automatically.
+
 ## How it works
 
 The whole engine is `make_cutout(image_bytes) -> png/webp bytes` in

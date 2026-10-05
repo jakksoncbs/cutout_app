@@ -15,3 +15,6 @@ venv/
 *_cutout.webp
 cutouts/
 out.png
+
+# Build output
+dist/
