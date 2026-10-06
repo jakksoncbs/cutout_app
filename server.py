@@ -33,9 +33,29 @@ def _startup() -> None:
 
 
 @app.post("/cutout")
-async def make_cutout(file: UploadFile, format: str = "png") -> Response:
+async def make_cutout(
+    file: UploadFile,
+    format: str = "png",
+    mode: str = "auto",
+    model: str = cutout.DEFAULT_MODEL,
+    alpha_matting: bool = False,
+    keep_interior: bool = False,
+) -> Response:
     fmt = "webp" if format.lower() == "webp" else "png"
-    result = cutout.make_cutout(await file.read(), fmt=fmt)
+    data = await file.read()
+    resolved = mode
+    if mode == "auto":
+        import logo
+
+        resolved = logo.suggest_mode(data)
+    if resolved == "logo":
+        import logo
+
+        result = logo.make_logo_cutout(data, fmt=fmt, keep_interior=keep_interior)
+    else:
+        result = cutout.make_cutout(
+            data, mode="subject", model=model, alpha_matting=alpha_matting, fmt=fmt
+        )
     if not result:
         return Response(
             "Cutout failed — the image could not be read, or the model is "
@@ -43,7 +63,8 @@ async def make_cutout(file: UploadFile, format: str = "png") -> Response:
             status_code=422,
         )
     media = "image/webp" if fmt == "webp" else "image/png"
-    return Response(result, media_type=media)
+    # Tell the UI which mode actually ran (useful when mode=auto).
+    return Response(result, media_type=media, headers={"X-Cutout-Mode": resolved})
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -95,6 +116,8 @@ INDEX_HTML = """<!doctype html>
 
   .controls { display: flex; align-items: center; gap: 16px; margin: 18px 0 4px; flex-wrap: wrap; }
   label.fmt { color: var(--muted); font-size: 14px; display: inline-flex; gap: 6px; align-items: center; }
+  label.fmt.chk { cursor: pointer; }
+  label.fmt[hidden] { display: none; }
   select {
     background: var(--panel); color: var(--text); border: 1px solid var(--border);
     border-radius: 8px; padding: 6px 10px; font: inherit;
@@ -159,6 +182,23 @@ INDEX_HTML = """<!doctype html>
   <input id="file" type="file" accept="image/*" hidden />
 
   <div class="controls">
+    <label class="fmt">Mode
+      <select id="mode">
+        <option value="auto">Auto-detect</option>
+        <option value="subject">Subject (photo)</option>
+        <option value="logo">Logo / flat background</option>
+      </select>
+    </label>
+    <label class="fmt" id="modelWrap">Quality
+      <select id="model">
+        <option value="fast">Fast (u2netp)</option>
+        <option value="portrait">Portrait (people)</option>
+        <option value="general" selected>General (recommended)</option>
+        <option value="best">Best (slow)</option>
+      </select>
+    </label>
+    <label class="fmt chk" id="amWrap"><input type="checkbox" id="am" /> Alpha matting (hair)</label>
+    <label class="fmt chk" id="keepWrap" hidden><input type="checkbox" id="keep" /> Keep interior holes</label>
     <label class="fmt">Format
       <select id="fmt">
         <option value="png">PNG (lossless alpha)</option>
@@ -188,7 +228,25 @@ INDEX_HTML = """<!doctype html>
 const drop = document.getElementById('drop');
 const fileInput = document.getElementById('file');
 const fmtSel = document.getElementById('fmt');
+const modeSel = document.getElementById('mode');
+const modelSel = document.getElementById('model');
+const amChk = document.getElementById('am');
+const keepChk = document.getElementById('keep');
+const modelWrap = document.getElementById('modelWrap');
+const amWrap = document.getElementById('amWrap');
+const keepWrap = document.getElementById('keepWrap');
 const statusEl = document.getElementById('status');
+
+function syncControls() {
+  // Logo controls vs subject controls. Auto shows subject controls (used if it
+  // resolves to a photo) and the logo option stays available via the Mode menu.
+  const isLogo = modeSel.value === 'logo';
+  modelWrap.hidden = isLogo;
+  amWrap.hidden = isLogo;
+  keepWrap.hidden = !isLogo;
+}
+modeSel.addEventListener('change', () => { syncControls(); if (currentFile) process(currentFile); });
+syncControls();
 const beforeStage = document.getElementById('beforeStage');
 const afterStage = document.getElementById('afterStage');
 const downloadBtn = document.getElementById('download');
@@ -224,16 +282,24 @@ async function process(file) {
   label.innerHTML = '<span class="spinner"></span>Removing background…';
 
   const fmt = fmtSel.value;
+  const params = new URLSearchParams({
+    format: fmt,
+    mode: modeSel.value,
+    model: modelSel.value,
+    alpha_matting: amChk.checked ? 'true' : 'false',
+    keep_interior: keepChk.checked ? 'true' : 'false',
+  });
   const form = new FormData();
   form.append('file', file);
   try {
-    const resp = await fetch('/cutout?format=' + encodeURIComponent(fmt), { method: 'POST', body: form });
+    const resp = await fetch('/cutout?' + params.toString(), { method: 'POST', body: form });
     if (!resp.ok) {
       const text = await resp.text();
       afterStage.innerHTML = '<span class="empty">Failed</span>';
       setStatus(text || ('Error ' + resp.status), true);
       return;
     }
+    const ranMode = resp.headers.get('X-Cutout-Mode') || modeSel.value;
     const blob = await resp.blob();
     if (resultUrl) URL.revokeObjectURL(resultUrl);
     resultUrl = URL.createObjectURL(blob);
@@ -248,15 +314,17 @@ async function process(file) {
     downloadBtn.href = resultUrl;
     downloadBtn.download = base + '_cutout.' + fmt;
     downloadBtn.style.display = 'inline-block';
-    setStatus('Done — ' + (blob.size / 1024).toFixed(0) + ' KB. Click Download to save.');
+    const modeNote = modeSel.value === 'auto' ? ' · auto → ' + ranMode : '';
+    setStatus('Done — ' + (blob.size / 1024).toFixed(0) + ' KB' + modeNote + '. Click Download to save.');
   } catch (err) {
     afterStage.innerHTML = '<span class="empty">Failed</span>';
     setStatus('Network error: ' + err, true);
   }
 }
 
-// Reprocess when the format changes and we already have a file.
-fmtSel.addEventListener('change', () => { if (currentFile) process(currentFile); });
+// Reprocess when any option changes and we already have a file.
+[fmtSel, modelSel, amChk, keepChk].forEach(el =>
+  el.addEventListener('change', () => { if (currentFile) process(currentFile); }));
 
 // Click / keyboard to open the picker.
 drop.addEventListener('click', () => fileInput.click());

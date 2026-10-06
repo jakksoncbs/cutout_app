@@ -21,7 +21,7 @@ rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$RES"
 
 # --- copy the app source into the bundle ---------------------------------
-for f in launch.py server.py cutout.py requirements.txt README.md; do
+for f in launch.py server.py cutout.py logo.py requirements.txt README.md; do
   cp "$ROOT/$f" "$RES/"
 done
 

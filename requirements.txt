@@ -3,6 +3,7 @@ rembg>=2.0
 onnxruntime>=1.17
 pillow>=10.2
 numpy>=1.26
+pymatting>=1.1          # alpha matting (cleaner hair/soft edges)
 
 # Web UI only (not needed for the CLI)
 fastapi>=0.111

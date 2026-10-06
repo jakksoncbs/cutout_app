@@ -18,17 +18,31 @@ pip install -r requirements.txt
 ### CLI
 
 ```bash
-# Single image -> input_cutout.png next to it
+# Single image -> input_cutout.png next to it (auto-detects photo vs logo)
 python cutout.py photo.jpg
 
 # Choose the output path and format
 python cutout.py photo.jpg -o subject.png
 python cutout.py photo.jpg -o subject.webp -f webp
 
+# Pick a model and refine hair edges (subject mode)
+python cutout.py photo.jpg --mode subject --model portrait --alpha-matting
+
+# Knock out a flat background behind a logo
+python cutout.py logo.png --mode logo
+
 # Batch: every image in a folder -> ./photos/cutouts/
 python cutout.py --batch ./photos
 python cutout.py --batch ./photos -o ./out -f webp
 ```
+
+**Modes** (`--mode`): `auto` (default — local heuristic picks subject vs logo,
+no network), `subject` (ML removal), `logo` (flat-background colour-key).
+
+**Models** (`--model`, subject mode): `fast` (u2netp, ~4 MB, weakest edges),
+`portrait` (u2net_human_seg, best for people), `general` (isnet-general-use,
+**default**, strong all-round), `best` (birefnet, state-of-the-art edges but
+~930 MB and slow on CPU). `--alpha-matting` refines hair/soft edges (slower).
 
 ### Web UI
 
@@ -37,8 +51,10 @@ python server.py        # open http://127.0.0.1:8000
 ```
 
 Drag-drop (or click / paste) an image. You get a before/after preview on a
-checkerboard so the transparency is visible, and a Download button. Switch
-between PNG and WebP with the dropdown.
+checkerboard so the transparency is visible, and a Download button. The controls
+let you pick the **mode** (Auto / Subject / Logo), the **quality model** and
+**alpha matting** (subject mode), **keep interior holes** (logo mode), and PNG
+vs WebP. In Auto mode the status line shows which mode actually ran.
 
 ## Desktop app (drop window on the taskbar / Dock)
 
@@ -105,27 +121,44 @@ repo and the build scripts will use them automatically.
 
 ## How it works
 
-The whole engine is `make_cutout(image_bytes) -> png/webp bytes` in
-[`cutout.py`](cutout.py). The pipeline, in order:
+There are two independent engines, picked by mode.
+
+**Subject mode** — `make_cutout(image_bytes) -> png/webp bytes` in
+[`cutout.py`](cutout.py), the ML path:
 
 1. **Fix EXIF orientation** — phone photos carry rotation; apply it first.
 2. **Downscale before removal** — the single biggest speedup. Runs the model on
    ~1 MP, not a 12 MP phone photo.
-3. **Remove the background** with a warmed `rembg` session → RGBA.
+3. **Remove the background** with a warmed `rembg` session → RGBA (optionally
+   with alpha matting for cleaner hair).
 4. **Downscale the result** to the final output size.
 5. **Trim transparent margins** so the subject fills the frame.
 6. **Encode** as PNG (lossless alpha) or WebP (`quality=82, method=6`).
 7. **Fail soft** — a bad file or a missing model never crashes the app.
 
+**Logo mode** — `make_logo_cutout(...)` in [`logo.py`](logo.py), a non-ML
+colour-key method for flat-background graphics:
+
+1. Detect the background colour from the four corners.
+2. **Flood-fill inward from the edges** so enclosed art survives.
+3. Build a **graduated alpha matte** so near-background pixels fade (kills the
+   anti-aliased halo around thin text).
+4. **De-fringe** semi-transparent edges to remove the pale background tint.
+   `keep_interior` preserves enclosed background-coloured regions; by default
+   they're cleared (transparent letter counters / ring centres).
+
+**Auto mode** uses a local heuristic (corner-colour spread + colour complexity)
+to choose subject vs logo — no network, no API calls.
+
 ## Configuration
 
 Edit the tunables at the top of `cutout.py`:
 
-| Constant      | Default    | Meaning                                                |
-| ------------- | ---------- | ------------------------------------------------------ |
-| `MAX_IN_DIM`  | `1600`     | Downscale input to this max dimension before removal.  |
-| `MAX_OUT_DIM` | `1024`     | Final cutout max dimension.                            |
-| `MODEL`       | `u2netp`   | rembg model. `isnet-general-use` is cleaner but larger.|
+| Constant        | Default     | Meaning                                              |
+| --------------- | ----------- | --------------------------------------------------- |
+| `MAX_IN_DIM`    | `1600`      | Downscale input to this max dimension before removal.|
+| `MAX_OUT_DIM`   | `1024`      | Final cutout max dimension.                          |
+| `DEFAULT_MODEL` | `general`   | Default subject model (friendly name in `MODELS`).   |
 
 ## Offline / sandboxed environments
 
@@ -142,5 +175,8 @@ model is cached, everything runs with no network access.
 - The model is **warmed at startup** (web) or before the first image (CLI) so
   the first request isn't slow; the session is reused for every image after.
 - `rembg` picks *one main subject* — it's the right tool for photos, not for
-  knocking a flat background out from behind a logo. (See section 6 of the
-  original handoff for that separate colour-key approach.)
+  knocking a flat background out from behind a logo. Use **logo mode** for that
+  (the non-ML colour-key path in `logo.py`).
+- The larger models download on first use: `portrait`/`general` ~170 MB each,
+  `best` ~930 MB. `fast` (u2netp) is only ~4 MB. Alpha matting needs `pymatting`
+  (in `requirements.txt`).
