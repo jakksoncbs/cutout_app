@@ -40,6 +40,8 @@ async def make_cutout(
     model: str = cutout.DEFAULT_MODEL,
     alpha_matting: bool = False,
     keep_interior: bool = False,
+    despill: str = "off",
+    despill_strength: float = 0.7,
 ) -> Response:
     fmt = "webp" if format.lower() == "webp" else "png"
     data = await file.read()
@@ -47,14 +49,15 @@ async def make_cutout(
     if mode == "auto":
         import logo
 
-        resolved = logo.suggest_mode(data)
+        resolved = "chroma" if cutout._detect_screen(data) else logo.suggest_mode(data)
     if resolved == "logo":
         import logo
 
         result = logo.make_logo_cutout(data, fmt=fmt, keep_interior=keep_interior)
     else:
         result = cutout.make_cutout(
-            data, mode="subject", model=model, alpha_matting=alpha_matting, fmt=fmt
+            data, mode=resolved, model=model, alpha_matting=alpha_matting,
+            despill=despill, despill_strength=despill_strength, fmt=fmt,
         )
     if not result:
         return Response(
@@ -187,6 +190,15 @@ INDEX_HTML = """<!doctype html>
         <option value="auto">Auto-detect</option>
         <option value="subject">Subject (photo)</option>
         <option value="logo">Logo / flat background</option>
+        <option value="chroma">Green / blue screen</option>
+      </select>
+    </label>
+    <label class="fmt" id="despillWrap">Spill
+      <select id="despill">
+        <option value="off">Off</option>
+        <option value="auto">Auto</option>
+        <option value="green">Green</option>
+        <option value="blue">Blue</option>
       </select>
     </label>
     <label class="fmt" id="modelWrap">Quality
@@ -232,18 +244,25 @@ const modeSel = document.getElementById('mode');
 const modelSel = document.getElementById('model');
 const amChk = document.getElementById('am');
 const keepChk = document.getElementById('keep');
+const despillSel = document.getElementById('despill');
 const modelWrap = document.getElementById('modelWrap');
 const amWrap = document.getElementById('amWrap');
 const keepWrap = document.getElementById('keepWrap');
+const despillWrap = document.getElementById('despillWrap');
 const statusEl = document.getElementById('status');
 
 function syncControls() {
-  // Logo controls vs subject controls. Auto shows subject controls (used if it
-  // resolves to a photo) and the logo option stays available via the Mode menu.
-  const isLogo = modeSel.value === 'logo';
-  modelWrap.hidden = isLogo;
-  amWrap.hidden = isLogo;
-  keepWrap.hidden = !isLogo;
+  // Show the controls that matter for the chosen mode.
+  const m = modeSel.value;
+  const isLogo = m === 'logo';
+  const isChroma = m === 'chroma';
+  modelWrap.hidden = isLogo || isChroma;   // ML model only for subject/auto
+  amWrap.hidden = isLogo || isChroma;
+  keepWrap.hidden = !isLogo;               // interior holes only for logo
+  despillWrap.hidden = isLogo;             // spill removal for subject/auto/chroma
+  // Chroma always despills on the server; show it as "Auto" and disabled there.
+  if (isChroma) { despillSel.value = 'auto'; despillSel.disabled = true; }
+  else { despillSel.disabled = false; }
 }
 modeSel.addEventListener('change', () => { syncControls(); if (currentFile) process(currentFile); });
 syncControls();
@@ -288,6 +307,7 @@ async function process(file) {
     model: modelSel.value,
     alpha_matting: amChk.checked ? 'true' : 'false',
     keep_interior: keepChk.checked ? 'true' : 'false',
+    despill: despillSel.value,
   });
   const form = new FormData();
   form.append('file', file);
@@ -323,7 +343,7 @@ async function process(file) {
 }
 
 // Reprocess when any option changes and we already have a file.
-[fmtSel, modelSel, amChk, keepChk].forEach(el =>
+[fmtSel, modelSel, amChk, keepChk, despillSel].forEach(el =>
   el.addEventListener('change', () => { if (currentFile) process(currentFile); }));
 
 // Click / keyboard to open the picker.

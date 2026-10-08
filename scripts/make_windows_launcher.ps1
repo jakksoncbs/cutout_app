@@ -23,7 +23,7 @@ if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
 New-Item -ItemType Directory -Force -Path $App | Out-Null
 
 # --- copy source ---------------------------------------------------------
-foreach ($f in @("launch.py","server.py","cutout.py","logo.py","requirements.txt","README.md")) {
+foreach ($f in @("launch.py","server.py","cutout.py","logo.py","despill.py","requirements.txt","README.md")) {
   Copy-Item (Join-Path $Root $f) (Join-Path $App $f)
 }
 

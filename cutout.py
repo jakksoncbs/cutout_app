@@ -39,6 +39,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageOps
 
+import despill as despill_mod
 import logo as logo_mode
 
 # --- Tunables -------------------------------------------------------------
@@ -170,12 +171,25 @@ def cutout_image(
 # --- public API -----------------------------------------------------------
 
 
+def _detect_screen(image_bytes: bytes) -> str | None:
+    """Return 'green'/'blue' if the shot is on a chroma screen, else None."""
+    try:
+        probe = Image.open(io.BytesIO(image_bytes))
+        probe = ImageOps.exif_transpose(probe).convert("RGB")
+        probe.thumbnail((512, 512))
+        return despill_mod.detect_screen(np.asarray(probe).astype(np.float64))
+    except Exception:
+        return None
+
+
 def make_cutout(
     image_bytes: bytes,
     *,
     mode: str = "subject",
     model: str = DEFAULT_MODEL,
     alpha_matting: bool = False,
+    despill: str = "off",
+    despill_strength: float = 0.7,
     fmt: str = "png",
     strict: bool = False,
 ) -> bytes | None:
@@ -184,7 +198,11 @@ def make_cutout(
     ``mode``:
       * ``"subject"`` — ML removal (default), honours ``model`` / ``alpha_matting``.
       * ``"logo"``    — colour-key method for flat-background logos/graphics.
-      * ``"auto"``    — pick subject vs logo with a local heuristic (no network).
+      * ``"chroma"``  — green/blue-screen keyer with built-in despill.
+      * ``"auto"``    — pick subject / logo / chroma with local heuristics (no network).
+
+    ``despill`` ('off' | 'auto' | 'green' | 'blue') removes colour spill from a
+    subject-mode cutout; ``despill_strength`` is 0..1. Chroma mode always despills.
 
     Returns ``None`` on any failure (fail soft). Set ``strict=True`` to raise
     :class:`CutoutError` with a reason instead. ``fmt`` is ``"png"`` or ``"webp"``.
@@ -195,7 +213,15 @@ def make_cutout(
         return None
 
     if mode == "auto":
-        mode = logo_mode.suggest_mode(image_bytes)
+        mode = "chroma" if _detect_screen(image_bytes) else logo_mode.suggest_mode(image_bytes)
+
+    spill_color = despill if despill in ("green", "blue") else "auto"
+
+    if mode == "chroma":
+        return despill_mod.make_chroma_cutout(
+            image_bytes, fmt=fmt, color=spill_color,
+            despill_strength=despill_strength, strict=strict,
+        )
 
     if mode == "logo":
         return logo_mode.make_logo_cutout(image_bytes, fmt=fmt, strict=strict)
@@ -203,6 +229,8 @@ def make_cutout(
     try:
         src = Image.open(io.BytesIO(image_bytes))
         out = cutout_image(src, model=model, alpha_matting=alpha_matting)
+        if despill and despill != "off":
+            out = despill_mod.despill_rgba(out, strength=despill_strength, color=spill_color)
         return _encode(out, fmt)
     except ImportError as exc:  # rembg / onnxruntime not installed
         if strict:
@@ -249,7 +277,7 @@ def _run_batch(in_dir: Path, out_dir: Path | None, fmt: str, **kw) -> int:
     if not images:
         print(f"No images found in {in_dir}", file=sys.stderr)
         return 1
-    if kw.get("mode") != "logo":
+    if kw.get("mode") not in ("logo", "chroma"):
         print(f"Warming model ({_resolve_model(kw.get('model', DEFAULT_MODEL))})...")
         warm(kw.get("model", DEFAULT_MODEL))
     print(f"Processing {len(images)} image(s) -> {out_dir}")
@@ -266,7 +294,7 @@ def _run_single(in_path: Path, out_path: Path | None, fmt: str, **kw) -> int:
         print(f"Input not found: {in_path}", file=sys.stderr)
         return 1
     out_path = out_path or _default_out_path(in_path, fmt)
-    if kw.get("mode") != "logo":
+    if kw.get("mode") not in ("logo", "chroma"):
         print(f"Warming model ({_resolve_model(kw.get('model', DEFAULT_MODEL))})...")
         warm(kw.get("model", DEFAULT_MODEL))
     return 0 if _process_one(in_path, out_path, fmt, **kw) else 1
@@ -281,8 +309,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-o", "--output", help="output file (single) or directory (batch)")
     parser.add_argument("--batch", metavar="DIR", help="process every image in DIR")
     parser.add_argument(
-        "-m", "--mode", choices=("auto", "subject", "logo"), default="auto",
-        help="auto-detect (default), subject (ML), or logo (colour-key)",
+        "-m", "--mode", choices=("auto", "subject", "logo", "chroma"), default="auto",
+        help="auto-detect (default), subject (ML), logo (colour-key), or "
+        "chroma (green/blue screen)",
     )
     parser.add_argument(
         "--model", choices=tuple(MODELS), default=DEFAULT_MODEL,
@@ -293,12 +322,23 @@ def main(argv: list[str] | None = None) -> int:
         help="refine hair/soft edges (subject mode; slower)",
     )
     parser.add_argument(
+        "--despill", choices=("off", "auto", "green", "blue"), default="off",
+        help="remove colour spill from a subject cutout (default: off)",
+    )
+    parser.add_argument(
+        "--despill-strength", type=float, default=0.7, metavar="0..1",
+        help="despill strength (default: 0.7)",
+    )
+    parser.add_argument(
         "-f", "--format", choices=("png", "webp"), default="png",
         help="output format (default: png)",
     )
     args = parser.parse_args(argv)
 
-    kw = dict(mode=args.mode, model=args.model, alpha_matting=args.alpha_matting)
+    kw = dict(
+        mode=args.mode, model=args.model, alpha_matting=args.alpha_matting,
+        despill=args.despill, despill_strength=args.despill_strength,
+    )
     out = Path(args.output) if args.output else None
 
     if args.batch:

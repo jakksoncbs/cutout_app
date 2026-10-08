@@ -28,21 +28,32 @@ python cutout.py photo.jpg -o subject.webp -f webp
 # Pick a model and refine hair edges (subject mode)
 python cutout.py photo.jpg --mode subject --model portrait --alpha-matting
 
+# Remove green spill from a subject cutout
+python cutout.py photo.jpg --mode subject --despill auto
+
 # Knock out a flat background behind a logo
 python cutout.py logo.png --mode logo
+
+# Green/blue screen: key out the screen + despill
+python cutout.py shot.jpg --mode chroma
 
 # Batch: every image in a folder -> ./photos/cutouts/
 python cutout.py --batch ./photos
 python cutout.py --batch ./photos -o ./out -f webp
 ```
 
-**Modes** (`--mode`): `auto` (default — local heuristic picks subject vs logo,
-no network), `subject` (ML removal), `logo` (flat-background colour-key).
+**Modes** (`--mode`): `auto` (default — local heuristics pick subject / logo /
+chroma, no network), `subject` (ML removal), `logo` (flat-background colour-key),
+`chroma` (green/blue-screen keyer with built-in despill).
 
 **Models** (`--model`, subject mode): `fast` (u2netp, ~4 MB, weakest edges),
 `portrait` (u2net_human_seg, best for people), `general` (isnet-general-use,
 **default**, strong all-round), `best` (birefnet, state-of-the-art edges but
 ~930 MB and slow on CPU). `--alpha-matting` refines hair/soft edges (slower).
+
+**Spill removal** (`--despill off|auto|green|blue`, `--despill-strength 0..1`):
+removes green/blue colour contamination from a subject cutout. Chroma mode
+despills automatically.
 
 ### Web UI
 
@@ -52,9 +63,10 @@ python server.py        # open http://127.0.0.1:8000
 
 Drag-drop (or click / paste) an image. You get a before/after preview on a
 checkerboard so the transparency is visible, and a Download button. The controls
-let you pick the **mode** (Auto / Subject / Logo), the **quality model** and
-**alpha matting** (subject mode), **keep interior holes** (logo mode), and PNG
-vs WebP. In Auto mode the status line shows which mode actually ran.
+let you pick the **mode** (Auto / Subject / Logo / Green-blue screen), the
+**quality model**, **alpha matting** and **spill removal** (subject mode),
+**keep interior holes** (logo mode), and PNG vs WebP. In Auto mode the status
+line shows which mode actually ran.
 
 ## Desktop app (drop window on the taskbar / Dock)
 
@@ -147,8 +159,21 @@ colour-key method for flat-background graphics:
    `keep_interior` preserves enclosed background-coloured regions; by default
    they're cleared (transparent letter counters / ring centres).
 
-**Auto mode** uses a local heuristic (corner-colour spread + colour complexity)
-to choose subject vs logo — no network, no API calls.
+**Chroma mode** — `make_chroma_cutout(...)` in [`despill.py`](despill.py), for
+footage shot on a green/blue screen:
+
+1. Key *on* the screen colour — alpha from "greenness" (`G − max(R, B)`), ramped
+   between a tolerance and a soft edge. More accurate than ML removal when you
+   actually shot against a screen.
+2. **De-fringe** edges by unmixing the screen colour from semi-transparent pixels.
+3. **Despill** the subject (the same channel-limiting used by Nuke/After Effects/
+   OBS: pull the key channel down toward the brighter of the other two, only
+   where it dominates, preserving luminance — so skin and non-green colours stay
+   put). Despill is also available standalone in subject mode via `--despill`.
+
+**Auto mode** uses local heuristics (a strong flat green/blue border → chroma;
+otherwise corner-colour spread + colour complexity → logo vs subject) — no
+network, no API calls.
 
 ## Configuration
 
