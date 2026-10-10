@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Model cache (downloaded by rembg on first use)
+.u2net/
+.rembg/
+
+# Outputs / scratch
+*_cutout.png
+*_cutout.webp
+cutouts/
+out.png
+
+# Build output
+dist/
