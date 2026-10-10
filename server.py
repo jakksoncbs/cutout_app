@@ -121,6 +121,8 @@ INDEX_HTML = """<!doctype html>
   label.fmt { color: var(--muted); font-size: 14px; display: inline-flex; gap: 6px; align-items: center; }
   label.fmt.chk { cursor: pointer; }
   label.fmt[hidden] { display: none; }
+  input[type=range] { accent-color: var(--accent); width: 110px; vertical-align: middle; }
+  #strengthVal { min-width: 34px; display: inline-block; text-align: right; }
   select {
     background: var(--panel); color: var(--text); border: 1px solid var(--border);
     border-radius: 8px; padding: 6px 10px; font: inherit;
@@ -201,6 +203,10 @@ INDEX_HTML = """<!doctype html>
         <option value="blue">Blue</option>
       </select>
     </label>
+    <label class="fmt" id="strengthWrap" hidden>Strength
+      <input type="range" id="strength" min="0" max="100" value="80" />
+      <span id="strengthVal">80%</span>
+    </label>
     <label class="fmt" id="modelWrap">Quality
       <select id="model">
         <option value="fast">Fast (u2netp)</option>
@@ -245,10 +251,13 @@ const modelSel = document.getElementById('model');
 const amChk = document.getElementById('am');
 const keepChk = document.getElementById('keep');
 const despillSel = document.getElementById('despill');
+const strengthSl = document.getElementById('strength');
+const strengthVal = document.getElementById('strengthVal');
 const modelWrap = document.getElementById('modelWrap');
 const amWrap = document.getElementById('amWrap');
 const keepWrap = document.getElementById('keepWrap');
 const despillWrap = document.getElementById('despillWrap');
+const strengthWrap = document.getElementById('strengthWrap');
 const statusEl = document.getElementById('status');
 
 function syncControls() {
@@ -263,6 +272,8 @@ function syncControls() {
   // Chroma always despills on the server; show it as "Auto" and disabled there.
   if (isChroma) { despillSel.value = 'auto'; despillSel.disabled = true; }
   else { despillSel.disabled = false; }
+  // The strength slider matters whenever despill actually runs.
+  strengthWrap.hidden = isLogo || (!isChroma && despillSel.value === 'off');
 }
 modeSel.addEventListener('change', () => { syncControls(); if (currentFile) process(currentFile); });
 syncControls();
@@ -308,6 +319,7 @@ async function process(file) {
     alpha_matting: amChk.checked ? 'true' : 'false',
     keep_interior: keepChk.checked ? 'true' : 'false',
     despill: despillSel.value,
+    despill_strength: (strengthSl.value / 100).toFixed(2),
   });
   const form = new FormData();
   form.append('file', file);
@@ -343,8 +355,12 @@ async function process(file) {
 }
 
 // Reprocess when any option changes and we already have a file.
-[fmtSel, modelSel, amChk, keepChk, despillSel].forEach(el =>
+[fmtSel, modelSel, amChk, keepChk, despillSel, strengthSl].forEach(el =>
   el.addEventListener('change', () => { if (currentFile) process(currentFile); }));
+// Toggling the spill colour shows/hides the strength slider.
+despillSel.addEventListener('change', syncControls);
+// Live % label while dragging (reprocess happens on release, via 'change').
+strengthSl.addEventListener('input', () => { strengthVal.textContent = strengthSl.value + '%'; });
 
 // Click / keyboard to open the picker.
 drop.addEventListener('click', () => fileInput.click());

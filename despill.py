@@ -91,11 +91,17 @@ def despill_array(rgb: np.ndarray, strength: float, color: str) -> np.ndarray:
     redistributing a little of the removed amount so colours don't go muddy.
     """
     rgb = rgb.astype(np.float64).copy()
+    strength = float(np.clip(strength, 0.0, 1.0))
     idx = 2 if color == "blue" else 1
     other = [0, 1, 2]
     other.remove(idx)
-    limit = np.maximum(rgb[..., other[0]], rgb[..., other[1]])
-    spill = np.clip(rgb[..., idx] - limit, 0.0, None)
+    hi = np.maximum(rgb[..., other[0]], rgb[..., other[1]])
+    lo = np.minimum(rgb[..., other[0]], rgb[..., other[1]])
+    # Target the key channel shouldn't exceed. At low strength this is max(R,B)
+    # (classic green-limiting); as strength climbs it drops toward min(R,B) so a
+    # stubborn yellow-green cast actually clears at the top of the slider.
+    target = hi - strength * 0.35 * (hi - lo)
+    spill = np.clip(rgb[..., idx] - target, 0.0, None)
     remove = strength * spill
     rgb[..., idx] -= remove
     # Preserve luminance: add a small, even share of the removed light back to

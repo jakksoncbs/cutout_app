@@ -64,9 +64,9 @@ python server.py        # open http://127.0.0.1:8000
 Drag-drop (or click / paste) an image. You get a before/after preview on a
 checkerboard so the transparency is visible, and a Download button. The controls
 let you pick the **mode** (Auto / Subject / Logo / Green-blue screen), the
-**quality model**, **alpha matting** and **spill removal** (subject mode),
-**keep interior holes** (logo mode), and PNG vs WebP. In Auto mode the status
-line shows which mode actually ran.
+**quality model**, **alpha matting**, **spill removal** + a **strength slider**
+(subject and chroma modes), **keep interior holes** (logo mode), and PNG vs
+WebP. In Auto mode the status line shows which mode actually ran.
 
 ## Desktop app (drop window on the taskbar / Dock)
 
